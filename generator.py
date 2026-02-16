@@ -1,17 +1,33 @@
 import logging
 import pandas as pd
 import os
+import openpyxl
+import xlwt
 
 logger = logging.getLogger(__name__)
 
 PLACEHOLDER = "$project"
 
 # -------------------------
+# Excel reader helper (AUTO engine)
+# -------------------------
+
+def read_excel_auto(path, sheet_name=0):
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xls":
+        logger.info(f"Reading XLS file with xlrd: {path}")
+        return pd.read_excel(path, sheet_name=sheet_name, engine="xlrd")
+    else:
+        logger.info(f"Reading XLSX file with openpyxl: {path}")
+        return pd.read_excel(path, sheet_name=sheet_name, engine="openpyxl")
+
+# -------------------------
 # Helpers
 # -------------------------
 
 def load_projects(projects_path):
-    df = pd.read_excel(projects_path)
+    df = read_excel_auto(projects_path, sheet_name=0)
+
     if "PROJECT" not in df.columns:
         raise ValueError("Projects file must have a column named 'PROJECT'")
 
@@ -100,8 +116,9 @@ def remove_duplicate_rows(existing_df, new_df):
     return pd.DataFrame(unique_rows, columns=new_df.columns)
 
 def append_to_existing_file(existing_file, new_sheets):
-    logger.info(f"Appending to existing output file: {existing_file}")
-    existing_sheets = pd.read_excel(existing_file, sheet_name=None)
+    logger.info("append_to_existing_file() called -> DELTA Import")
+
+    existing_sheets = read_excel_auto(existing_file, sheet_name=None)
 
     merged_sheets = {}
 
@@ -113,7 +130,7 @@ def append_to_existing_file(existing_file, new_sheets):
             unique_new_df = remove_duplicate_rows(existing_df, new_df)
 
             if len(unique_new_df) > 0:
-                logger.info(f"Sheet '{sheet_name}': appending {len(unique_new_df)} new rows")
+                logger.info(f"Sheet '{sheet_name}': appending {len(unique_new_df)} rows")
                 merged_df = pd.concat([existing_df, unique_new_df], ignore_index=True)
                 merged_sheets[sheet_name] = merged_df
             else:
@@ -131,8 +148,6 @@ def append_to_existing_file(existing_file, new_sheets):
     return merged_sheets
 
 def convert_xlsx_to_xls(xlsx_path, xls_path):
-    import openpyxl
-    import xlwt
 
     logger.info(f"Converting XLSX to XLS: {xlsx_path} -> {xls_path}")
 
@@ -158,17 +173,16 @@ def generate_sre(template_path, projects_path, owners_path, baseline_path, outpu
     logger.info("Starting SOD generation")
 
     # Load inputs
-    all_sheets = pd.read_excel(template_path, sheet_name=None)
-    logger.info(f"Loaded template with {len(all_sheets)} sheets")
-
+    all_sheets = read_excel_auto(template_path, sheet_name=None)
     projects = load_projects(projects_path)
-    logger.info(f"Loaded {len(projects)} projects")
+    owners_df = read_excel_auto(owners_path, sheet_name=0)
 
-    owners_df = pd.read_excel(owners_path)
     required_cols = {"PROJECT", "OWNER TYPE", "OWNER NAME", "RANK"}
     if not required_cols.issubset(set(owners_df.columns)):
         raise ValueError(f"Owners file must have columns: {required_cols}")
 
+    logger.info(f"Loaded template with {len(all_sheets)} sheets")
+    logger.info(f"Loaded {len(projects)} projects")
     logger.info(f"Loaded owners file with {len(owners_df)} rows")
 
     # Generate all sheets normally
@@ -226,21 +240,23 @@ def generate_sre(template_path, projects_path, owners_path, baseline_path, outpu
         new_sheets["Risks-Owners"] = risk_owners_df
 
     # -------------------------
-    # Baseline (delta) or full (SAFE)
+    # Baseline (delta) or full
     # -------------------------
     use_delta = False
 
     if baseline_path and os.path.exists(baseline_path):
+        logger.info(f"Output file provided: {baseline_path}")
         try:
-            baseline_sheets = pd.read_excel(baseline_path, sheet_name=None)
-            if baseline_sheets and any(len(df) > 0 for df in baseline_sheets.values()):
-                use_delta = True
+            read_excel_auto(baseline_path, sheet_name=None)
+            use_delta = True
         except Exception as e:
             logger.warning("Failed to read output file, switching to FULL Import", exc_info=e)
             use_delta = False
+    else:
+        logger.info("No Output file provided")
 
     if use_delta:
-        logger.info("Mode: DELTA Import(append-only)")
+        logger.info("Mode: DELTA Import")
         final_sheets = append_to_existing_file(baseline_path, new_sheets)
     else:
         logger.info("Mode: FULL Import (no valid output file found)")

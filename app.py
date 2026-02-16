@@ -33,6 +33,7 @@ async def generate(
 ):
     workdir = f"work_{uuid.uuid4().hex}"
     os.makedirs(workdir, exist_ok=True)
+
     logger.info("Received generate request")
 
     template_path = os.path.join(workdir, "template.xlsx")
@@ -53,7 +54,9 @@ async def generate(
         shutil.copyfileobj(owners.file, f)
 
     if baseline:
-        baseline_path = os.path.join(workdir, "baseline.xlsx")
+        # Keep original extension (.xls or .xlsx)
+        ext = os.path.splitext(baseline.filename)[1].lower() or ".xlsx"
+        baseline_path = os.path.join(workdir, "baseline" + ext)
         with open(baseline_path, "wb") as f:
             shutil.copyfileobj(baseline.file, f)
 
@@ -72,13 +75,11 @@ async def generate(
     xls_path = os.path.join(workdir, "output.xls")
     logger.info(f"Sending file to client: {xls_path}")
 
-    download_name = "output.xls"
-
     return FileResponse(
         path=xls_path,
+        filename="output.xls",
         media_type="application/vnd.ms-excel",
-        filename=download_name,
         headers={
-            "Content-Disposition": f'attachment; filename="{download_name}"'
+            "Content-Disposition": 'attachment; filename="output.xls"'
         }
     )
