@@ -1,4 +1,4 @@
-
+import logging
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -9,6 +9,12 @@ import os
 import uuid
 
 from generator import generate_sre
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -27,11 +33,12 @@ async def generate(
 ):
     workdir = f"work_{uuid.uuid4().hex}"
     os.makedirs(workdir, exist_ok=True)
+    logger.info("Received generate request")
 
     template_path = os.path.join(workdir, "template.xlsx")
     projects_path = os.path.join(workdir, "projects.xlsx")
     owners_path = os.path.join(workdir, "owners.xlsx")
-    output_path = os.path.join(workdir, "output.xlsx")
+    output_xlsx_path = os.path.join(workdir, "output.xlsx")
 
     baseline_path = None
 
@@ -50,17 +57,28 @@ async def generate(
         with open(baseline_path, "wb") as f:
             shutil.copyfileobj(baseline.file, f)
 
-    # Run generator
+    logger.info("Starting generation process")
+
     generate_sre(
         template_path=template_path,
         projects_path=projects_path,
         owners_path=owners_path,
         baseline_path=baseline_path,
-        output_path=output_path
+        output_path=output_xlsx_path
     )
 
+    logger.info("Generation process completed")
+
+    xls_path = os.path.join(workdir, "output.xls")
+    logger.info(f"Sending file to client: {xls_path}")
+
+    download_name = "output.xls"
+
     return FileResponse(
-        output_path,
-        filename="output.xlsx",
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        path=xls_path,
+        media_type="application/vnd.ms-excel",
+        filename=download_name,
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"'
+        }
     )
